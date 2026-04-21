@@ -3,3 +3,6 @@ dist/
 *.tgz
 .env
 .env.local
+
+.build-sha
+**/.build-sha
