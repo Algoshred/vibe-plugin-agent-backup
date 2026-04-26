@@ -48,19 +48,19 @@ export class WspaceStorageTarget implements StorageTarget {
     const folderId = await this.ensureFolderHierarchy(agentName);
     logger.info(LOG_SOURCE, `Backup folder ready: ${folderId}`);
 
-    const fileName = `agent-${timestamp}.db`;
+    const fileName = `agent-${timestamp}.vcbackup`;
     const fileBuffer = readFileSync(filePath);
     const fileSize = statSync(filePath).size;
 
     const initiateResult = await this.hostServices.workspaceQuery<{
       initiateUpload: { session: { id: string }; uploadUrl: string };
     }>(`mutation($input:InitiateUploadInput!){initiateUpload(input:$input){session{id}uploadUrl}}`,
-      { input: { folderId, fileName, fileSize: fileSize.toString(), mimeType: "application/x-sqlite3", extension: "db" } });
+      { input: { folderId, fileName, fileSize: fileSize.toString(), mimeType: "application/octet-stream", extension: "vcbackup" } });
 
     if (initiateResult.errors?.length) throw new Error(`Failed to initiate upload: ${initiateResult.errors[0].message}`);
     const { session, uploadUrl } = initiateResult.data!.initiateUpload;
 
-    const putResponse = await fetch(uploadUrl, { method: "PUT", body: fileBuffer, headers: { "Content-Type": "application/x-sqlite3" } });
+    const putResponse = await fetch(uploadUrl, { method: "PUT", body: fileBuffer, headers: { "Content-Type": "application/octet-stream" } });
     if (!putResponse.ok) throw new Error(`S3 upload failed: ${putResponse.status} ${putResponse.statusText}`);
 
     const completeResult = await this.hostServices.workspaceQuery<{
@@ -123,7 +123,7 @@ export class WspaceStorageTarget implements StorageTarget {
       }>(`query($folderId:ID,$pagination:PaginationInput){getFilesInFolder(folderId:$folderId,pagination:$pagination){files{id name size createdAt}}}`,
         { folderId, pagination: { limit: 200 } });
       return (filesResult.data?.getFilesInFolder?.files ?? [])
-        .filter((f) => f.name.endsWith(".db"))
+        .filter((f) => f.name.endsWith(".vcbackup"))
         .map((f) => ({ path: `backups/vibecontrols/agents/${agentName}/${f.name}`, size: parseInt(f.size, 10) || 0, lastModified: f.createdAt }))
         .sort((a, b) => b.lastModified.localeCompare(a.lastModified));
     } catch { return []; }

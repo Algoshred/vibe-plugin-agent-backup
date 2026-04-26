@@ -12,7 +12,7 @@ export type {
 export const vibePlugin: VibePlugin = {
   name: "backup",
   version: "1.0.0",
-  description: "SQLite database backup/restore — back up agent databases to S3 or custom storage",
+  description: "Agent storage backup/restore — back up Skalex-backed agent state to S3 or custom storage",
   tags: ["backend", "cli"],
   cliCommand: "backup",
   apiPrefix: "/api/backup",

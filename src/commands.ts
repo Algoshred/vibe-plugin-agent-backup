@@ -11,7 +11,7 @@ async function apiFetch(urlPath: string, options?: RequestInit): Promise<Respons
 }
 
 export function registerBackupCommands(program: Command): void {
-  const backup = program.command("backup").description("SQLite database backup & restore");
+  const backup = program.command("backup").description("Agent storage backup & restore");
 
   backup.command("run").description("Trigger a manual backup").option("--force", "Skip change detection")
     .action(async (opts: { force?: boolean }) => {

@@ -23,7 +23,7 @@ export class CustomS3StorageTarget implements StorageTarget {
 
   private getKey(agentName: string, timestamp: string): string {
     const prefix = this.pathPrefix ? `${this.pathPrefix.replace(/\/+$/, "")}/` : "";
-    return `${prefix}vibecontrols/agents/${agentName}/agent-${timestamp}.db`;
+    return `${prefix}vibecontrols/agents/${agentName}/agent-${timestamp}.vcbackup`;
   }
 
   private getAgentPrefix(agentName: string): string {
@@ -35,7 +35,7 @@ export class CustomS3StorageTarget implements StorageTarget {
     const key = this.getKey(agentName, timestamp);
     await this.client.send(new PutObjectCommand({
       Bucket: this.bucket, Key: key, Body: readFileSync(filePath),
-      ContentType: "application/x-sqlite3",
+      ContentType: "application/octet-stream",
       Metadata: { "agent-name": agentName, "backup-timestamp": timestamp },
     }));
     return { storagePath: key };
@@ -55,7 +55,7 @@ export class CustomS3StorageTarget implements StorageTarget {
     const prefix = this.getAgentPrefix(agentName);
     const response = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix }));
     return (response.Contents ?? [])
-      .filter((obj) => obj.Key?.endsWith(".db"))
+      .filter((obj) => obj.Key?.endsWith(".vcbackup"))
       .map((obj) => ({ path: obj.Key!, size: obj.Size ?? 0, lastModified: obj.LastModified?.toISOString() ?? "" }))
       .sort((a, b) => b.lastModified.localeCompare(a.lastModified));
   }
