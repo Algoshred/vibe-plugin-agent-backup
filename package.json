@@ -1,6 +1,6 @@
 {
-  "name": "@vibecontrols/vibe-plugin-backup",
-  "version": "2026.428.1",
+  "name": "@vibecontrols/vibe-plugin-agent-backup",
+  "version": "2026.428.3",
   "main": "./dist/index.js",
   "type": "module",
   "engines": {
@@ -59,11 +59,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/algoshred/vibe-plugin-backup.git"
+    "url": "git+https://github.com/algoshred/vibe-plugin-agent-backup.git"
   },
   "homepage": "https://vibecontrols.com",
   "publishConfig": {
-    "access": "restricted",
+    "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
   "files": [
@@ -87,5 +87,8 @@
     "picomatch": ">=2.3.2",
     "immutable": ">=3.8.3",
     "minimatch": ">=3.1.3"
+  },
+  "bugs": {
+    "url": "https://github.com/algoshred/vibe-plugin-agent-backup/issues"
   }
 }
