@@ -1,6 +1,6 @@
 {
   "name": "@vibecontrols/vibe-plugin-backup",
-  "version": "0.0.0-dev",
+  "version": "2026.428.1",
   "main": "./dist/index.js",
   "type": "module",
   "engines": {
@@ -32,7 +32,7 @@
     "url": "https://github.com/tvvignesh"
   },
   "license": "SEE LICENSE IN LICENSE",
-  "description": "Agent storage backup/restore plugin — back up Skalex-backed agent state to S3 or custom storage",
+  "description": "Agent storage backup/restore plugin \u2014 back up Skalex-backed agent state to S3 or custom storage",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.800.0",
     "@aws-sdk/s3-request-presigner": "^3.800.0"
