@@ -10,6 +10,12 @@ export type {
 } from "./types.js";
 
 export const vibePlugin: VibePlugin = {
+  capabilities: {
+    storage: "rw",
+    subprocess: true,
+    audit: true,
+    telemetry: true,
+  },
   name: "backup",
   version: "1.0.0",
   description: "Agent storage backup/restore — back up Skalex-backed agent state to S3 or custom storage",
@@ -24,6 +30,7 @@ export const vibePlugin: VibePlugin = {
   },
 
   async onServerStart(_app: Elysia, hostServices: HostServices) {
+    hostServices?.telemetry?.emit("backup.ready", {});
     setHostServices(hostServices);
     console.log("  Plugin 'backup' registered routes: /api/backup");
   },
