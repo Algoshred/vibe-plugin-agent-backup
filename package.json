@@ -1,6 +1,6 @@
 {
   "name": "@vibecontrols/vibe-plugin-agent-backup",
-  "version": "2026.509.3",
+  "version": "2026.509.4",
   "main": "./dist/index.js",
   "type": "module",
   "engines": {
