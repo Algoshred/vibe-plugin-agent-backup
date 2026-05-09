@@ -18,7 +18,9 @@
 
 interface OpenTuiRenderer {
   root: { ctx: unknown; add: (child: unknown) => void };
-  keyInput: { on: (event: string, cb: (key: { name: string }) => void) => void };
+  keyInput: {
+    on: (event: string, cb: (key: { name: string }) => void) => void;
+  };
   destroy: () => void;
 }
 

@@ -3,8 +3,9 @@ import {
   runMultimode,
   pickOutputMode,
   maybePrintJson,
+  redact,
   type OutputFlags,
-} from "./utils/multimode.js";
+} from "@vibecontrols/plugin-sdk/cli";
 import {
   interactiveTable,
   interactiveDetail,
@@ -14,28 +15,18 @@ import {
 const AGENT_BASE_URL = process.env.VIBE_AGENT_URL ?? "http://localhost:3005";
 const API_KEY = process.env.VIBE_AGENT_API_KEY ?? "";
 
-async function apiFetch(urlPath: string, options?: RequestInit): Promise<Response> {
+async function apiFetch(
+  urlPath: string,
+  options?: RequestInit,
+): Promise<Response> {
   return fetch(`${AGENT_BASE_URL}${urlPath}`, {
     ...options,
-    headers: { "Content-Type": "application/json", "x-agent-api-key": API_KEY, ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      "x-agent-api-key": API_KEY,
+      ...options?.headers,
+    },
   });
-}
-
-/** Redact obvious secret-shaped fields recursively for JSON output. */
-function redactSecrets(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactSecrets);
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (/(token|secret|password|apikey|api_key)/i.test(k)) {
-        out[k] = "[REDACTED]";
-      } else {
-        out[k] = redactSecrets(v);
-      }
-    }
-    return out;
-  }
-  return value;
 }
 
 interface BackupRecord {
@@ -47,7 +38,9 @@ interface BackupRecord {
 }
 
 export function registerBackupCommands(program: Command): void {
-  const backup = program.command("backup").description("Agent storage backup & restore");
+  const backup = program
+    .command("backup")
+    .description("Agent storage backup & restore");
 
   backup
     .command("run")
@@ -56,9 +49,23 @@ export function registerBackupCommands(program: Command): void {
     .option("--json", "Emit JSON")
     .option("--plain", "Force plain text output")
     .action(async (opts: { force?: boolean } & OutputFlags) => {
-      const res = await apiFetch(`/api/backup/run?force=${opts.force ? "true" : "false"}`, { method: "POST" });
-      const data = (await res.json()) as { ok?: boolean; backup?: Record<string, unknown>; error?: unknown };
-      if (maybePrintJson(opts, { ok: !!data.ok, action: "run", result: redactSecrets(data) })) return;
+      const res = await apiFetch(
+        `/api/backup/run?force=${opts.force ? "true" : "false"}`,
+        { method: "POST" },
+      );
+      const data = (await res.json()) as {
+        ok?: boolean;
+        backup?: Record<string, unknown>;
+        error?: unknown;
+      };
+      if (
+        maybePrintJson(opts, {
+          ok: !!data.ok,
+          action: "run",
+          result: redact(data),
+        })
+      )
+        return;
       if (data.ok) {
         const b = data.backup as Record<string, unknown> | undefined;
         if (b && b.error === "Skipped: no changes")
@@ -67,7 +74,8 @@ export function registerBackupCommands(program: Command): void {
           console.log(
             `Backup completed: ${b.id}\n  Size: ${(Number(b.dbSizeBytes) / 1024).toFixed(1)} KB\n  Path: ${b.storagePath}\n  Duration: ${b.durationMs}ms`,
           );
-      } else console.error("Backup failed:", data.error || JSON.stringify(data));
+      } else
+        console.error("Backup failed:", data.error || JSON.stringify(data));
     });
 
   backup
@@ -76,20 +84,33 @@ export function registerBackupCommands(program: Command): void {
     .option("--dry-run", "Validate only")
     .option("--json", "Emit JSON")
     .option("--plain", "Force plain text output")
-    .action(async (backupId: string, opts: { dryRun?: boolean } & OutputFlags) => {
-      const res = await apiFetch("/api/backup/restore", {
-        method: "POST",
-        body: JSON.stringify({ backupId, dryRun: opts.dryRun ?? false }),
-      });
-      const data = (await res.json()) as {
-        success?: boolean;
-        message?: string;
-        preRestorePath?: string;
-      };
-      if (maybePrintJson(opts, { ok: !!data.success, action: "restore", backupId, result: redactSecrets(data) })) return;
-      console.log(data.success ? data.message : `Restore failed: ${data.message}`);
-      if (data.preRestorePath) console.log(`  Safety backup: ${data.preRestorePath}`);
-    });
+    .action(
+      async (backupId: string, opts: { dryRun?: boolean } & OutputFlags) => {
+        const res = await apiFetch("/api/backup/restore", {
+          method: "POST",
+          body: JSON.stringify({ backupId, dryRun: opts.dryRun ?? false }),
+        });
+        const data = (await res.json()) as {
+          success?: boolean;
+          message?: string;
+          preRestorePath?: string;
+        };
+        if (
+          maybePrintJson(opts, {
+            ok: !!data.success,
+            action: "restore",
+            backupId,
+            result: redact(data),
+          })
+        )
+          return;
+        console.log(
+          data.success ? data.message : `Restore failed: ${data.message}`,
+        );
+        if (data.preRestorePath)
+          console.log(`  Safety backup: ${data.preRestorePath}`);
+      },
+    );
 
   backup
     .command("list")
@@ -98,11 +119,19 @@ export function registerBackupCommands(program: Command): void {
     .option("--json", "Emit JSON")
     .option("--plain", "Force plain text output")
     .action(async (opts: { limit: string } & OutputFlags) => {
-      await runMultimode<{ ok: boolean; total: number; backups: BackupRecord[] }>({
+      await runMultimode<{
+        ok: boolean;
+        total: number;
+        backups: BackupRecord[];
+      }>({
         mode: pickOutputMode(opts),
         fetchData: async () => {
           const res = await apiFetch(`/api/backup/list?limit=${opts.limit}`);
-          return (await res.json()) as { ok: boolean; total: number; backups: BackupRecord[] };
+          return (await res.json()) as {
+            ok: boolean;
+            total: number;
+            backups: BackupRecord[];
+          };
         },
         plain: (data) => {
           if (data.ok && data.backups.length > 0) {
@@ -137,7 +166,7 @@ export function registerBackupCommands(program: Command): void {
             rows,
           });
         },
-        json: (data) => redactSecrets(data),
+        json: (data) => redact(data),
       });
     });
 
@@ -149,41 +178,57 @@ export function registerBackupCommands(program: Command): void {
     .argument("[value]")
     .option("--json", "Emit JSON")
     .option("--plain", "Force plain text output")
-    .action(async (action: string | undefined, key: string | undefined, value: string | undefined, opts: OutputFlags) => {
-      if (!action || action === "show") {
-        await runMultimode<{ config: Record<string, unknown> }>({
-          mode: pickOutputMode(opts),
-          fetchData: async () => {
-            const res = await apiFetch("/api/backup/config");
-            return (await res.json()) as { config: Record<string, unknown> };
-          },
-          plain: (data) => {
-            console.log(JSON.stringify(data.config, null, 2));
-          },
-          interactive: async (data) => {
-            await interactiveDetail({
-              title: "backup config",
-              body: JSON.stringify(redactSecrets(data.config), null, 2),
-            });
-          },
-          json: (data) => redactSecrets(data),
-        });
-        return;
-      }
-      if (action === "set" && key && value) {
-        let parsed: unknown = value;
-        if (value === "true") parsed = true;
-        else if (value === "false") parsed = false;
-        else if (!isNaN(Number(value))) parsed = Number(value);
-        const res = await apiFetch("/api/backup/config", {
-          method: "PUT",
-          body: JSON.stringify({ [key]: parsed }),
-        });
-        const data = (await res.json()) as { ok?: boolean };
-        if (maybePrintJson(opts, { ok: !!data.ok, action: "config-set", key, value: parsed })) return;
-        if (data.ok) console.log(`Updated ${key} = ${value}`);
-      } else console.log("Usage: vibe backup config [show | set <key> <value>]");
-    });
+    .action(
+      async (
+        action: string | undefined,
+        key: string | undefined,
+        value: string | undefined,
+        opts: OutputFlags,
+      ) => {
+        if (!action || action === "show") {
+          await runMultimode<{ config: Record<string, unknown> }>({
+            mode: pickOutputMode(opts),
+            fetchData: async () => {
+              const res = await apiFetch("/api/backup/config");
+              return (await res.json()) as { config: Record<string, unknown> };
+            },
+            plain: (data) => {
+              console.log(JSON.stringify(data.config, null, 2));
+            },
+            interactive: async (data) => {
+              await interactiveDetail({
+                title: "backup config",
+                body: JSON.stringify(redact(data.config), null, 2),
+              });
+            },
+            json: (data) => redact(data),
+          });
+          return;
+        }
+        if (action === "set" && key && value) {
+          let parsed: unknown = value;
+          if (value === "true") parsed = true;
+          else if (value === "false") parsed = false;
+          else if (!isNaN(Number(value))) parsed = Number(value);
+          const res = await apiFetch("/api/backup/config", {
+            method: "PUT",
+            body: JSON.stringify({ [key]: parsed }),
+          });
+          const data = (await res.json()) as { ok?: boolean };
+          if (
+            maybePrintJson(opts, {
+              ok: !!data.ok,
+              action: "config-set",
+              key,
+              value: parsed,
+            })
+          )
+            return;
+          if (data.ok) console.log(`Updated ${key} = ${value}`);
+        } else
+          console.log("Usage: vibe backup config [show | set <key> <value>]");
+      },
+    );
 
   backup
     .command("status")
@@ -217,7 +262,7 @@ export function registerBackupCommands(program: Command): void {
             ].join("\n"),
           });
         },
-        json: (data) => redactSecrets(data),
+        json: (data) => redact(data),
       });
     });
 
@@ -230,19 +275,27 @@ export function registerBackupCommands(program: Command): void {
       await runMultimode<{ ok: boolean; message: string }>({
         mode: pickOutputMode(opts),
         fetchData: async () => {
-          const res = await apiFetch("/api/backup/test-connection", { method: "POST" });
+          const res = await apiFetch("/api/backup/test-connection", {
+            method: "POST",
+          });
           return (await res.json()) as { ok: boolean; message: string };
         },
         plain: (data) => {
-          console.log(data.ok ? `Connection OK: ${data.message}` : `Connection failed: ${data.message}`);
+          console.log(
+            data.ok
+              ? `Connection OK: ${data.message}`
+              : `Connection failed: ${data.message}`,
+          );
         },
         interactive: async (data) => {
           await interactiveDetail({
             title: "backup test",
-            body: data.ok ? `Connection OK\n${data.message}` : `Connection failed\n${data.message}`,
+            body: data.ok
+              ? `Connection OK\n${data.message}`
+              : `Connection failed\n${data.message}`,
           });
         },
-        json: (data) => redactSecrets(data),
+        json: (data) => redact(data),
       });
     });
 }

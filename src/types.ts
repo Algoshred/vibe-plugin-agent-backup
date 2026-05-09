@@ -1,11 +1,21 @@
 /**
- * Type declarations for vibe-plugin-backup.
+ * Type declarations for vibe-plugin-agent-backup.
+ *
+ * Plugin contract / host service / capability types come from
+ * @vibecontrols/plugin-sdk — do NOT redeclare them locally.
  */
 
-import type { Elysia } from "elysia";
-import type { Command } from "commander";
+import type { HostServices } from "@vibecontrols/plugin-sdk/contract";
 
-// ── Host-provided interfaces ────────────────────────────────────────────
+// ── Agent-specific host surface extension ───────────────────────────────
+//
+// The SDK's HostServices is the structural minimum every plugin can rely on.
+// This plugin uses richer agent-specific surface (storage.list returning
+// StorageEntry[], synchronous getConfig, workspaceQuery, isGatewayConfigured,
+// getAgentRecordId, getWorkspaceId) that the SDK contract intentionally
+// keeps loose. We type these as a local extension; this is NOT a
+// redeclaration of any SDK type — it's an augmentation for what the plugin
+// reaches for at runtime against the vibecontrols-agent host.
 
 export interface StorageEntry {
   key: string;
@@ -13,43 +23,31 @@ export interface StorageEntry {
   updatedAt?: string;
 }
 
-export interface StorageProvider {
+/**
+ * Agent's runtime storage provider — string-valued, with rich `list()`
+ * returning `StorageEntry[]`. The SDK's `StorageProvider` is a structural
+ * subset (generic-typed values, optional `list` returning `string[]`); we
+ * use the agent shape directly here because the plugin reads/writes
+ * stringified JSON via `TypedStore`, and `listBackups()` needs the rich
+ * key+value entries. This is NOT a redeclaration of an SDK type.
+ */
+export interface AgentStorageProvider {
   get(namespace: string, key: string): Promise<string | null>;
   set(namespace: string, key: string, value: string): Promise<void>;
   delete(namespace: string, key: string): Promise<boolean>;
   list(namespace: string): Promise<StorageEntry[]>;
-  deleteAll(namespace: string): Promise<number>;
+  deleteAll?(namespace: string): Promise<number>;
 }
 
-export interface ServiceRegistry {
-  get<T = unknown>(name: string): T | undefined;
-}
-
-export type WsEventType = string;
-
-export interface HostServices {
-  telemetry?: {
-    emit: (name: string, payload?: Record<string, unknown>) => void;
-  };
-  storage: StorageProvider;
-  logger: {
-    debug(source: string, message: string, metadata?: Record<string, unknown>): void;
-    info(source: string, message: string, metadata?: Record<string, unknown>): void;
-    warn(source: string, message: string, metadata?: Record<string, unknown>): void;
-    error(source: string, message: string, metadata?: Record<string, unknown>): void;
-  };
-  serviceRegistry: ServiceRegistry;
-  broadcast(type: WsEventType, payload: unknown): void;
+export interface AgentHostServices extends Omit<HostServices, "storage"> {
+  storage: AgentStorageProvider;
   workspaceQuery<T = Record<string, unknown>>(
     query: string,
     variables?: Record<string, unknown>,
   ): Promise<{ data?: T; errors?: Array<{ message: string }> }>;
   isGatewayConfigured(): boolean;
-  getAgentRecordId(): string | null;
-  getWorkspaceId(): string | null;
-  getConfig(key: string): string | undefined;
-  getAgentBaseUrl(): string;
-  getAgentVersion(): string;
+  getAgentRecordId(): Promise<string | null>;
+  getWorkspaceId(): Promise<string | null>;
 }
 
 export interface PluginRouteDeps {
@@ -59,36 +57,9 @@ export interface PluginRouteDeps {
     getConfig(key: string): string | undefined;
     setConfig(key: string, value: string): void;
   };
-  broadcast: (type: WsEventType, payload: unknown) => void;
-  hostServices?: HostServices;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  app?: any;
-}
-
-export interface PluginCapabilities {
-  storage?: "none" | "read" | "rw";
-  secrets?: "none" | "read" | "rw";
-  gateway?: boolean;
-  broadcast?: boolean;
-  subprocess?: boolean;
-  audit?: boolean;
-  telemetry?: boolean;
-}
-
-export interface VibePlugin {
-  capabilities?: PluginCapabilities;
-  name: string;
-  version: string;
-  description?: string;
-  tags?: Array<"backend" | "frontend" | "cli" | "provider" | "adapter" | "integration">;
-  cliCommand?: string;
-  apiPrefix?: string;
-  onCliSetup?: (program: Command, hostServices: HostServices) => void | Promise<void>;
-  onServerStart?: (app: Elysia, hostServices: HostServices) => void | Promise<void>;
-  onServerReady?: (app: Elysia, hostServices: HostServices) => void | Promise<void>;
-  onServerStop?: () => void | Promise<void>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  createRoutes?: (deps: PluginRouteDeps) => any;
+  broadcast: (type: string, payload: unknown) => void;
+  hostServices?: AgentHostServices;
+  app?: unknown;
 }
 
 // ── Backup domain types ─────────────────────────────────────────────────
@@ -143,9 +114,15 @@ export interface BackupStatus {
 }
 
 export interface StorageTarget {
-  upload(filePath: string, agentName: string, timestamp: string): Promise<{ storagePath: string; fileId?: string }>;
+  upload(
+    filePath: string,
+    agentName: string,
+    timestamp: string,
+  ): Promise<{ storagePath: string; fileId?: string }>;
   download(storagePath: string, targetPath: string): Promise<void>;
   delete(storagePath: string, fileId?: string): Promise<void>;
-  list(agentName: string): Promise<Array<{ path: string; size: number; lastModified: string }>>;
+  list(
+    agentName: string,
+  ): Promise<Array<{ path: string; size: number; lastModified: string }>>;
   testConnection(): Promise<{ ok: boolean; message: string }>;
 }
