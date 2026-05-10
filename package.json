@@ -36,7 +36,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.800.0",
     "@aws-sdk/s3-request-presigner": "^3.800.0",
-    "@vibecontrols/plugin-sdk": "2026.509.1"
+    "@vibecontrols/plugin-sdk": "2026.509.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
