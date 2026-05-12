@@ -32,7 +32,7 @@
     "url": "https://github.com/tvvignesh"
   },
   "license": "SEE LICENSE IN LICENSE",
-  "description": "Agent storage backup/restore plugin — back up Skalex-backed agent state to S3 or custom storage",
+  "description": "Agent storage backup/restore plugin \u2014 back up Skalex-backed agent state to S3 or custom storage",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.800.0",
     "@aws-sdk/s3-request-presigner": "^3.800.0",
@@ -64,8 +64,8 @@
   },
   "homepage": "https://vibecontrols.com",
   "publishConfig": {
-    "access": "restricted",
-    "registry": "https://verdaccio.tooling.internal.burdenoff.com/"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "files": [
     "dist/**/*",
