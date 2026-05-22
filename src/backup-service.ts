@@ -81,6 +81,44 @@ export class BackupService {
     return (await this.deps.db.getConfig("agent-name")) ?? hostname();
   }
 
+  /**
+   * Snapshot the live storage to `targetPath`. Prefers the adapter's own
+   * `backup(targetPath)` (Skalex/Postgres provide deterministic dumps).
+   * Falls back to tarring the data directory at `getDbPath()` for older
+   * adapter builds that pre-date the `backup()` contract — the
+   * "this.deps.db.backup is not a function" path observed in alpha when
+   * a stale adapter was bundled into the agent image.
+   */
+  private async snapshot(targetPath: string): Promise<void> {
+    const db = this.deps.db as unknown as {
+      backup?: (p: string) => Promise<void>;
+      getDbPath?: () => string;
+    };
+    if (typeof db.backup === "function") {
+      await db.backup(targetPath);
+      return;
+    }
+    if (typeof db.getDbPath !== "function") {
+      throw new Error(
+        "Backup unavailable: storage adapter has neither backup() nor getDbPath().",
+      );
+    }
+    const dbPath = db.getDbPath();
+    this.log.warn(
+      "Storage adapter does not implement backup(); falling back to tar of getDbPath()",
+      { dbPath },
+    );
+    const proc = Bun.spawn(
+      ["tar", "-czf", targetPath, "-C", dbPath, "."],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      const err = await new Response(proc.stderr).text();
+      throw new Error(`Backup fallback tar failed (exit ${exitCode}): ${err}`);
+    }
+  }
+
   private async getLastBackupHash(): Promise<string | null> {
     return this.lastHashStore.get();
   }
@@ -104,7 +142,7 @@ export class BackupService {
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
       const tempPath = join(tmpdir(), `vibe-backup-${randomUUID()}.db`);
       this.log.info(`Creating snapshot at: ${tempPath}`);
-      await this.deps.db.backup(tempPath);
+      await this.snapshot(tempPath);
 
       const hasher = new Bun.CryptoHasher("sha256");
       hasher.update(readFileSync(tempPath));
