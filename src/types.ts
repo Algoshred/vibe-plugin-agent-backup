@@ -52,10 +52,10 @@ export interface AgentHostServices extends Omit<HostServices, "storage"> {
 
 export interface PluginRouteDeps {
   db: {
-    vacuumInto(targetPath: string): void;
+    backup(targetPath: string): Promise<void>;
     getDbPath(): string;
-    getConfig(key: string): string | undefined;
-    setConfig(key: string, value: string): void;
+    getConfig(key: string): Promise<string | undefined> | string | undefined;
+    setConfig(key: string, value: string): Promise<void> | void;
   };
   broadcast: (type: string, payload: unknown) => void;
   hostServices?: AgentHostServices;

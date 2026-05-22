@@ -77,27 +77,17 @@ export class BackupService {
     return merged;
   }
 
-  getAgentName(): string {
-    return this.deps.db.getConfig("agent-name") ?? hostname();
-  }
-
-  private async computeDbHash(): Promise<string> {
-    const hasher = new Bun.CryptoHasher("sha256");
-    hasher.update(readFileSync(this.deps.db.getDbPath()));
-    return hasher.digest("hex");
+  async getAgentName(): Promise<string> {
+    return (await this.deps.db.getConfig("agent-name")) ?? hostname();
   }
 
   private async getLastBackupHash(): Promise<string | null> {
     return this.lastHashStore.get();
   }
 
-  async hasChangedSinceLastBackup(): Promise<boolean> {
-    return (await this.computeDbHash()) !== (await this.getLastBackupHash());
-  }
-
   async runBackup(force = false): Promise<BackupRecord> {
     const config = await this.getConfig();
-    const agentName = this.getAgentName();
+    const agentName = await this.getAgentName();
     const startTime = Date.now();
 
     this.log.info(`Starting backup for agent: ${agentName}`, {
@@ -107,18 +97,37 @@ export class BackupService {
     this.deps.broadcast("backup:started", { agentName, force });
 
     try {
+      // Snapshot first, then hash the snapshot itself for change-detection.
+      // The old impl tried to hash getDbPath() directly, which broke for
+      // adapters that aren't a single file (Skalex = directory, Postgres =
+      // connection string).
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const tempPath = join(tmpdir(), `vibe-backup-${randomUUID()}.db`);
+      this.log.info(`Creating snapshot at: ${tempPath}`);
+      await this.deps.db.backup(tempPath);
+
+      const hasher = new Bun.CryptoHasher("sha256");
+      hasher.update(readFileSync(tempPath));
+      const sha256Hash = hasher.digest("hex");
+      const dbSizeBytes = statSync(tempPath).size;
+
       if (
         !force &&
         config.changeOnlyBackup &&
-        !(await this.hasChangedSinceLastBackup())
+        sha256Hash === (await this.getLastBackupHash())
       ) {
+        try {
+          unlinkSync(tempPath);
+        } catch {
+          /* ignore */
+        }
         this.log.info("No changes detected, skipping backup");
         return {
           id: randomUUID(),
           timestamp: new Date().toISOString(),
           agentName,
-          dbSizeBytes: 0,
-          sha256Hash: (await this.getLastBackupHash()) ?? "",
+          dbSizeBytes,
+          sha256Hash,
           storageTarget: config.storageTarget,
           storagePath: "",
           durationMs: Date.now() - startTime,
@@ -126,16 +135,6 @@ export class BackupService {
           error: "Skipped: no changes",
         };
       }
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const tempPath = join(tmpdir(), `vibe-backup-${randomUUID()}.db`);
-      this.log.info(`Creating snapshot at: ${tempPath}`);
-      this.deps.db.vacuumInto(tempPath);
-
-      const hasher = new Bun.CryptoHasher("sha256");
-      hasher.update(readFileSync(tempPath));
-      const sha256Hash = hasher.digest("hex");
-      const dbSizeBytes = statSync(tempPath).size;
 
       const storageTarget = createStorageTarget(config, this.hostServices);
       const uploadResult = await storageTarget.upload(
