@@ -94,7 +94,7 @@ jobs:
       - name: Check results
         run: |
           result="${{ needs.test.result }}"
-          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+          if [ "$result" != "success" ]; then
             echo "::error::Test & Build $result — PR Gate fails"
             exit 1
           fi
