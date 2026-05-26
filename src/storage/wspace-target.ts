@@ -246,9 +246,12 @@ export class WspaceStorageTarget implements StorageTarget {
         message: "Gateway is not configured. Run 'vibe setup' first.",
       };
     try {
+      // wspace-files-svc StorageUsage exposes `filesCount` (and `foldersCount`),
+      // not `fileCount`. Querying the wrong name fails composition at the
+      // gateway with "Cannot query field 'fileCount' on type 'StorageUsage'".
       const result = await this.hostServices.workspaceQuery<{
-        getStorageUsage: { totalSize: string; fileCount: number };
-      }>(`query{getStorageUsage{totalSize fileCount}}`);
+        getStorageUsage: { totalSize: string; filesCount: number };
+      }>(`query{getStorageUsage{totalSize filesCount}}`);
       if (result.errors?.length)
         return { ok: false, message: result.errors[0].message };
       return { ok: true, message: "Connected to workspace files service" };
