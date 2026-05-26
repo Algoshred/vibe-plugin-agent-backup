@@ -76,6 +76,12 @@ export const createPlugin: VibePluginFactory = (
       subprocess: true,
       audit: true,
       telemetry: true,
+      // Required: WspaceStorageTarget calls `hostServices.workspaceQuery`
+      // (and `getAgentRecordId` / `getWorkspaceId`) against the workspace
+      // gateway to manage backup folders + upload backup files into the
+      // user's wspace-files-svc folder. Without this flag the capability
+      // proxy refuses the call and the backup never uploads.
+      gateway: true,
     },
     name: PLUGIN_NAME,
     version: PLUGIN_VERSION,
