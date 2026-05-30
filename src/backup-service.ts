@@ -108,10 +108,21 @@ export class BackupService {
       "Storage adapter does not implement backup(); falling back to tar of getDbPath()",
       { dbPath },
     );
-    const proc = Bun.spawn(
-      ["tar", "-czf", targetPath, "-C", dbPath, "."],
-      { stdout: "pipe", stderr: "pipe" },
-    );
+    // `tar` ships with Windows 10 1803+ (tar.exe) as well as POSIX systems, so
+    // we guard on availability rather than platform. If it's missing, the
+    // storage adapter must implement backup() instead.
+    const tarPath = Bun.which("tar", { PATH: process.env.PATH });
+    if (tarPath === null) {
+      throw new Error(
+        "Backup fallback requires tar: 'tar' was not found on PATH. " +
+          "Install tar (bundled with Windows 10 1803+ and most POSIX systems) " +
+          "or use a storage adapter that implements backup().",
+      );
+    }
+    const proc = Bun.spawn([tarPath, "-czf", targetPath, "-C", dbPath, "."], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     const exitCode = await proc.exited;
     if (exitCode !== 0) {
       const err = await new Response(proc.stderr).text();
