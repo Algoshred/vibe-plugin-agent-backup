@@ -4,7 +4,8 @@ import {
   renameSync,
   unlinkSync,
   statSync,
-  writeFileSync,
+  mkdirSync,
+  rmSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, hostname } from "node:os";
@@ -197,6 +198,15 @@ export class BackupService {
         /* ignore */
       }
 
+      // Stamp the workspace so restore can reject a cross-workspace restore
+      // (the per-workspace encryption key wouldn't decrypt the ciphertext).
+      let workspaceId: string | undefined;
+      try {
+        workspaceId = (await this.hostServices.getWorkspaceId()) ?? undefined;
+      } catch {
+        /* best-effort — older records simply omit it */
+      }
+
       const record: BackupRecord = {
         id: randomUUID(),
         timestamp: new Date().toISOString(),
@@ -208,6 +218,7 @@ export class BackupService {
         fileId: uploadResult.fileId,
         durationMs: Date.now() - startTime,
         status: "completed",
+        ...(workspaceId ? { workspaceId } : {}),
       };
 
       await this.store
@@ -236,7 +247,11 @@ export class BackupService {
     options: RestoreOptions,
   ): Promise<{ success: boolean; message: string; preRestorePath?: string }> {
     const config = await this.getConfig();
-    const record = await this.getBackupRecord(options.backupId);
+    // Resolve the record locally, or accept the source agent's record inline
+    // for RESTORE-TO-ANY-AGENT (the target agent's local store has no record
+    // for a backup taken on a different agent).
+    const record =
+      options.inlineRecord ?? (await this.getBackupRecord(options.backupId));
     if (!record)
       return {
         success: false,
@@ -245,7 +260,22 @@ export class BackupService {
     if (record.status !== "completed" || !record.storagePath)
       return { success: false, message: "Cannot restore from a failed backup" };
 
-    const tempPath = join(tmpdir(), `vibe-restore-${randomUUID()}.db`);
+    // Workspace-scope: a backup is encrypted with the SOURCE workspace's key.
+    // Restoring it onto an agent in another workspace would produce ciphertext
+    // that can't be decrypted — reject before touching any data.
+    if (
+      options.callerWorkspaceId &&
+      record.workspaceId &&
+      options.callerWorkspaceId !== record.workspaceId
+    ) {
+      return {
+        success: false,
+        message:
+          "This backup belongs to a different workspace and cannot be restored here (encryption keys differ).",
+      };
+    }
+
+    const tempPath = join(tmpdir(), `vibe-restore-${randomUUID()}.tar.gz`);
     const storageTarget = createStorageTarget(config, this.hostServices);
     await storageTarget.download(record.storagePath, tempPath);
 
@@ -263,30 +293,90 @@ export class BackupService {
       };
     }
 
+    // The artifact is a .tar.gz of the storage DIRECTORY (both the adapter's
+    // backup() and the tar fallback produce `tar -czf … -C <dbDir> .`). So the
+    // restore must UNTAR into a staging directory and atomically SWAP the
+    // directory — the previous `renameSync(file, dir)` over the data directory
+    // never worked. Staging + pre-restore live as SIBLINGS of the data dir so
+    // every rename is same-filesystem (atomic, no EXDEV across tmpfs).
     const dbPath = this.deps.db.getDbPath();
-    const preRestorePath = `${dbPath}.pre-restore-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-    if (existsSync(dbPath)) writeFileSync(preRestorePath, readFileSync(dbPath));
+    const targetAgentName = await this.getAgentName();
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const stagingDir = `${dbPath}.restore-staging-${randomUUID()}`;
+    const preRestorePath = `${dbPath}.pre-restore-${stamp}`;
+
+    const tarPath = Bun.which("tar", { PATH: process.env.PATH });
+    if (tarPath === null) {
+      unlinkSync(tempPath);
+      return {
+        success: false,
+        message:
+          "Restore requires 'tar' on PATH to unpack the backup archive — install tar and retry.",
+      };
+    }
 
     try {
-      for (const ext of ["-wal", "-shm"]) {
-        const p = dbPath + ext;
-        if (existsSync(p)) unlinkSync(p);
+      mkdirSync(stagingDir, { recursive: true });
+      const proc = Bun.spawn([tarPath, "-xzf", tempPath, "-C", stagingDir], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) {
+        const err = await new Response(proc.stderr).text();
+        throw new Error(`tar extract failed (exit ${exitCode}): ${err}`);
       }
-      renameSync(tempPath, dbPath);
-      this.log.info("Database restored. Agent restart recommended.");
+
+      // Atomic directory swap: move current data aside, move staging in.
+      if (existsSync(dbPath)) renameSync(dbPath, preRestorePath);
+      renameSync(stagingDir, dbPath);
+
+      unlinkSync(tempPath);
+      this.log.info(
+        "Storage restored from backup. Agent restart recommended.",
+        {
+          backupId: record.id,
+          sourceAgent: record.agentName,
+        },
+      );
+      this.deps.broadcast("backup:restored", {
+        agentName: targetAgentName,
+        backupId: record.id,
+        sourceAgent: record.agentName,
+        success: true,
+      });
       return {
         success: true,
         message:
-          "Database restored successfully. Please restart the agent for changes to take effect.",
+          "Storage restored successfully. Restart the agent for the change to take effect.",
         preRestorePath,
       };
     } catch (err) {
-      if (existsSync(preRestorePath))
-        try {
+      // Roll back: if we already moved the live data aside, put it back.
+      try {
+        if (existsSync(preRestorePath) && !existsSync(dbPath)) {
           renameSync(preRestorePath, dbPath);
-        } catch {
-          /* critical */
         }
+      } catch {
+        /* critical — leave both dirs in place for manual recovery */
+      }
+      try {
+        if (existsSync(stagingDir))
+          rmSync(stagingDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+      try {
+        if (existsSync(tempPath)) unlinkSync(tempPath);
+      } catch {
+        /* best-effort */
+      }
+      this.deps.broadcast("backup:restored", {
+        agentName: targetAgentName,
+        backupId: record.id,
+        sourceAgent: record.agentName,
+        success: false,
+      });
       return {
         success: false,
         message: `Restore failed: ${err instanceof Error ? err.message : String(err)}`,

@@ -96,11 +96,32 @@ export interface BackupRecord {
   durationMs: number;
   status: "completed" | "failed";
   error?: string;
+  /**
+   * Workspace the backup belongs to. The agent's encryption key is
+   * per-workspace, so a backup can only be restored onto an agent in the
+   * SAME workspace (cross-workspace ciphertext won't decrypt). restore()
+   * uses this to reject cross-workspace restores before any file swap.
+   * Optional for back-compat with records written before this field.
+   */
+  workspaceId?: string;
 }
 
 export interface RestoreOptions {
   backupId: string;
   dryRun?: boolean;
+  /**
+   * Workspace of the caller (from the gateway). When set, restore rejects a
+   * backup whose `workspaceId` differs — the per-workspace encryption keys
+   * wouldn't match.
+   */
+  callerWorkspaceId?: string;
+  /**
+   * RESTORE-TO-ANY-AGENT: when the backup was taken on a DIFFERENT agent (so
+   * this agent's local store has no record for `backupId`), the platform
+   * passes the source agent's record inline. Same-workspace only — enforced
+   * via `callerWorkspaceId` vs `inlineRecord.workspaceId`.
+   */
+  inlineRecord?: BackupRecord;
 }
 
 export interface BackupStatus {

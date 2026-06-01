@@ -1,6 +1,10 @@
 import { Elysia, t } from "elysia";
 import { BoundLogger } from "@vibecontrols/plugin-sdk";
-import type { AgentHostServices, PluginRouteDeps } from "./types.js";
+import type {
+  AgentHostServices,
+  BackupRecord,
+  PluginRouteDeps,
+} from "./types.js";
 import { BackupService } from "./backup-service.js";
 import { BackupScheduler } from "./scheduler.js";
 
@@ -90,15 +94,30 @@ export function createBackupRoutes(deps: PluginRouteDeps) {
       "/restore",
       async ({ body }) => {
         const { svc } = ensureInit(deps);
+        // This agent serves exactly one workspace; the svc already enforced
+        // the caller is in it. So our own workspaceId IS the caller's — pass
+        // it so restore rejects a backup stamped with a different workspace.
+        let callerWorkspaceId: string | undefined;
+        try {
+          callerWorkspaceId =
+            (await hostServicesRef?.getWorkspaceId()) ?? undefined;
+        } catch {
+          /* best-effort */
+        }
         return svc.restore({
           backupId: body.backupId,
           dryRun: body.dryRun ?? false,
+          callerWorkspaceId,
+          // Restore-to-any-agent: the platform passes the SOURCE agent's record
+          // when restoring a backup taken on a different (same-workspace) agent.
+          inlineRecord: body.inlineRecord as BackupRecord | undefined,
         });
       },
       {
         body: t.Object({
           backupId: t.String(),
           dryRun: t.Optional(t.Boolean()),
+          inlineRecord: t.Optional(t.Unknown()),
         }),
       },
     )
