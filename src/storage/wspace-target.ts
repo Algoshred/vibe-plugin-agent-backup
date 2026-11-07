@@ -6,6 +6,18 @@ import type { AgentHostServices, StorageTarget } from "../types.js";
 const LOG_SOURCE = "backup:wspace-target";
 const BACKUP_FOLDER_HIERARCHY = ["backups", "vibecontrols", "agents"];
 
+/**
+ * Extracts the agent folder name from a storage path of the form
+ * `backups/vibecontrols/agents/<agent>/<file>`. Throws when the path has no
+ * parent segment instead of silently resolving an "undefined" folder.
+ */
+function agentNameFromStoragePath(storagePath: string): string {
+  const agentName = storagePath.split("/").slice(-2, -1)[0];
+  if (!agentName)
+    throw new Error(`Invalid backup storage path: '${storagePath}'`);
+  return agentName;
+}
+
 interface FolderResult {
   id: string;
   name: string;
@@ -68,7 +80,7 @@ export class WspaceStorageTarget implements StorageTarget {
 
       if (createResult.errors?.length)
         throw new Error(
-          `Failed to create folder '${folderName}': ${createResult.errors[0].message}`,
+          `Failed to create folder '${folderName}': ${createResult.errors[0]?.message ?? "unknown error"}`,
         );
       const created = createResult.data!.createFolder;
       this.folderCache.set(cacheKey, created.id);
@@ -111,7 +123,7 @@ export class WspaceStorageTarget implements StorageTarget {
 
     if (initiateResult.errors?.length)
       throw new Error(
-        `Failed to initiate upload: ${initiateResult.errors[0].message}`,
+        `Failed to initiate upload: ${initiateResult.errors[0]?.message ?? "unknown error"}`,
       );
     const { session, uploadUrl } = initiateResult.data!.initiateUpload;
 
@@ -137,7 +149,7 @@ export class WspaceStorageTarget implements StorageTarget {
 
     if (completeResult.errors?.length)
       throw new Error(
-        `Failed to complete upload: ${completeResult.errors[0].message}`,
+        `Failed to complete upload: ${completeResult.errors[0]?.message ?? "unknown error"}`,
       );
     const fileId = completeResult.data!.completeUpload.fileId;
     this.log.info(`Backup uploaded: fileId=${fileId}`);
@@ -151,7 +163,7 @@ export class WspaceStorageTarget implements StorageTarget {
     if (!this.hostServices.isGatewayConfigured())
       throw new Error("Gateway is not configured.");
     const fileName = basename(storagePath);
-    const agentName = storagePath.split("/").slice(-2, -1)[0];
+    const agentName = agentNameFromStoragePath(storagePath);
     const folderId = await this.ensureFolderHierarchy(agentName);
 
     const filesResult = await this.hostServices.workspaceQuery<{
@@ -174,7 +186,7 @@ export class WspaceStorageTarget implements StorageTarget {
     );
     if (urlResult.errors?.length)
       throw new Error(
-        `Failed to get download URL: ${urlResult.errors[0].message}`,
+        `Failed to get download URL: ${urlResult.errors[0]?.message ?? "unknown error"}`,
       );
 
     const response = await fetch(urlResult.data!.getFileDownloadUrl);
@@ -187,7 +199,7 @@ export class WspaceStorageTarget implements StorageTarget {
       throw new Error("Gateway is not configured.");
     if (!fileId) {
       const fileName = basename(storagePath);
-      const agentName = storagePath.split("/").slice(-2, -1)[0];
+      const agentName = agentNameFromStoragePath(storagePath);
       const folderId = await this.ensureFolderHierarchy(agentName);
       const filesResult = await this.hostServices.workspaceQuery<{
         getFilesInFolder: { files: Array<{ id: string; name: string }> };
@@ -253,7 +265,10 @@ export class WspaceStorageTarget implements StorageTarget {
         getStorageUsage: { totalSize: string; filesCount: number };
       }>(`query{getStorageUsage{totalSize filesCount}}`);
       if (result.errors?.length)
-        return { ok: false, message: result.errors[0].message };
+        return {
+          ok: false,
+          message: result.errors[0]?.message ?? "unknown error",
+        };
       return { ok: true, message: "Connected to workspace files service" };
     } catch (err) {
       return {
